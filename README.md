@@ -1,2 +1,2 @@
 # emule-parsers
-A few small scripts for parsing eMule artifacts
+A Python3 tool for parsing eMule / aMule artifacts
