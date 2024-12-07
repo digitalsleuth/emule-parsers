@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools >= 61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+exclude = ["debian*", "binaries*", "build*", "dist*", "archive*"]
+
+[project]
+name = "emule-parser"
+version = "2.0.0"
+requires-python = ">=3.6"
+authors = [
+  {name = "Corey Forman (digitalsleuth)", email = "github@digitalsleuth.ca"}
+]
+maintainers = [
+  {name = "Corey Forman (digitalsleuth)", email = "github@digitalsleuth.ca"}
+]
+description = "Python 3 tool to parse an eMule / aMule installation"
+readme = "README.md"
+license = {file = "LICENSE"}
+keywords = ["digital forensics", "dfir", "emule", "amule"]
+classifiers = [
+  "Development Status :: 5 - Production/Stable",
+  "Programming Language :: Python :: 3",
+  "Operating System :: OS Independent"
+]
+
+[project.urls]
+Homepage = "https://github.com/digitalsleuth/emule-parsers"
+
+[project.scripts]
+emule-parser = "emule_parser.emule_parser:main"

@@ -1,0 +1,6 @@
+archive
+samples
+dist
+build
+*.egg-info
+@eaDir
