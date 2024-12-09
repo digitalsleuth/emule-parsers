@@ -12,14 +12,16 @@ import sys
 import socket
 import os
 import json
+import configparser
 from argparse import ArgumentParser
 from datetime import datetime as dt
 
 __author__ = "Corey Forman"
-__date__ = "6 Dec 2024"
+__date__ = "8 Dec 2024"
 __version__ = "2.0"
 __description__ = "eMule/aMule file parser"
 
+MET_HEADER = "e0"
 
 class MetError(Exception):
     pass
@@ -39,9 +41,14 @@ def process(isdir, isfile):
         "amulesig.dat",
         "emulesig.dat",
         "canceled.met",
+        "clients.met",
         "preferencesKad.dat",
         "server.met",
         "nodes.dat",
+        "amule.conf",
+        "emule.conf",
+        "remote.conf",
+        "ED2KLinks"
     ]
     WILL_PROCESS = []
     RESULTS = {}
@@ -73,14 +80,73 @@ def process(isdir, isfile):
             processed = server_met(entry)
         if "nodes.dat" in os.path.basename(entry):
             processed = nodes(entry)
+        if ".conf" in os.path.basename(entry):
+            processed = config_file(entry)
+        if "ED2KLinks" in os.path.basename(entry):
+            processed = ed2k_links(entry)
+        if "clients" in os.path.basename(entry):
+            processed = clients_met(entry)
         RESULTS[entry] = processed
 
     return RESULTS
 
 
+def ed2k_links(ed2k_file):
+    RESULT = {}
+    RESULT["File"] = ed2k_file
+    RESULT["Links"] = {}
+    with open(ed2k_file) as file:
+        content = file.readlines()
+    for line in content:
+        idx = content.index(line)
+        RESULT["Links"][idx] = {}
+        line = line.split('|')
+        if len(line) == 6:
+            prefix, link_type, name, size, md4_hash, addl_content = line
+        elif len(line) == 7:
+            prefix, link_type, name, size, md4_hash, part_root_hash, addl_content = line
+            RESULT["Links"][idx]["Partial or Root Hash"] = part_root_hash
+        elif len(line) == 8:
+            prefix, link_type, name, size, md4_hash, sep, sources, addl_content = line
+            RESULT["Links"][idx]["Sources"] = sources
+        addl_content = addl_content.rstrip()
+        RESULT["Links"][idx]["Name"] = name
+        RESULT["Links"][idx]["File Size"] = size
+        RESULT["Links"][idx]["MD4 Hash"] = md4_hash
+        RESULT["Links"][idx]["Addl Content"] = addl_content
+    return RESULT
+
+
+def config_file(config, start=0, ERRORS=None):
+    RESULT = {}
+    RESULT["File"] = config
+    RESULT["Content"] = {}
+    RESULT["Parsing Errors"] = {}  
+    conf_obj = configparser.ConfigParser(interpolation=None, allow_no_value=True)
+    try:
+      
+        with open(config, 'r') as conf_file:
+            if start != 0:
+                content = conf_file.readlines()[start - 1:]
+                conf_str = ''.join(content)
+                conf_obj.read_string(conf_str)
+                RESULT["Parsing Errors"] = ERRORS["Parsing Errors"]
+            else:
+                conf_obj.read_file(conf_file)
+        sections = conf_obj.sections()
+        for section in sections:
+            items = conf_obj.items(section)
+            RESULT["Content"][section] = dict(items)
+    except configparser.MissingSectionHeaderError as e:
+        ERRORS = {}
+        ERRORS["Parsing Errors"] = {}
+        ERRORS["Parsing Errors"][f"Line {e.lineno}"] = {"Error": str(e), "Line Content": e.line}
+        RESULT = config_file(config, e.lineno + 1, ERRORS)
+    return RESULT
+
+
 def server_met(met_file):
     servers = {}
-    met_header = "e0"
     tag_ids = {
         "01": "Server Name",  # Name of the server
         "0b": "Description",  # Short description about the server
@@ -122,7 +188,7 @@ def server_met(met_file):
     infile = open(met_file, "rb")
     file_size = os.fstat(infile.fileno()).st_size
     file_header = infile.read(1).hex()
-    if file_header != met_header:
+    if file_header != MET_HEADER:
         raise HeaderMismatch("Invalid Server.Met file header - expected 'E0'")
     (server_count,) = struct.unpack("<I", infile.read(4))
     servers["Server Count"] = server_count
@@ -237,6 +303,33 @@ def server_met(met_file):
                 raise SystemExit(1)
     return servers
 
+def clients_met(clients):
+    RESULT = {}
+    RESULT["File"] = clients
+    RESULT["Clients"] = {}
+    hash_padding = None
+    sid_hash = None
+    with open(clients, 'rb') as met_file:
+        clients_size = os.fstat(met_file.fileno()).st_size
+        (version, ) = struct.unpack('B', met_file.read(1))
+        (num_clients, ) = struct.unpack('I', met_file.read(4))
+        for client in range(num_clients - 1):
+            user_hash, low_up_to, low_down_fr, dt_client_id, high_up_to, high_down_fr, rsrvd, sid_hash_size, sid_hash_content = struct.unpack('<16s5IhB80s', met_file.read(119))
+            user_hash = user_hash.hex()
+            total_up = high_up_to * 2**32 + low_up_to
+            total_down = high_down_fr * 2**32 + low_down_fr
+            dt_client_id = f'{dt.utcfromtimestamp(float(dt_client_id)).strftime("%Y-%m-%d %H:%M:%S")} UTC'
+            if len(sid_hash_content) > sid_hash_size:
+                sid_hash = sid_hash_content[:sid_hash_size].hex()
+                hash_padding = sid_hash_content[sid_hash_size:].hex()
+            RESULT["Clients"][client] = {"User Hash": user_hash, "Total Uploaded to Client": total_up, "Total Downloaded from Client": total_down, "Date Client last ID'd": dt_client_id, "SID Hash": sid_hash, "Hash Padding": hash_padding}
+            offset = met_file.tell()
+            remainder = clients_size - offset
+            if remainder < 119:
+                (remaining_bytes, ) = struct.unpack(f"<{remainder}s", met_file.read(remainder))
+                RESULT[f"Remaining {remainder } Bytes"] = remaining_bytes.hex()
+                break
+    return RESULT
 
 def pref_kad(kad):
     RESULT = {}
